@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF隐私信息遮盖系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            background-color: #f8f9fa;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-area:hover {
+            border-color: #007bff;
+            background-color: #e3f2fd;
+        }
+        
+        .upload-area.dragover {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        
+        .file-info {
+            background-color: #e9ecef;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        
+        .preview-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            background-color: #f8f9fa;
+        }
+        
+        .result-card {
+            border-left: 4px solid #007bff;
+        }
+        
+        .loading {
+            display: none;
+        }
+        
+        .progress-container {
+            display: none;
+        }
+        
+        .mask-details {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .status-success {
+            color: #28a745;
+        }
+        
+        .status-failed {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <div class="col-md-3 bg-dark text-white min-vh-100 p-4">
+                <h3 class="mb-4">
+                    <i class="fas fa-shield-alt"></i>
+                    PDF隐私遮盖系统
+                </h3>
+                <div class="mb-4">
+                    <h6>功能说明：</h6>
+                    <ul class="list-unstyled small">
+                        <li><i class="fas fa-check text-success"></i> 检测身份证号码</li>
+                        <li><i class="fas fa-check text-success"></i> 检测手机号码</li>
+                        <li><i class="fas fa-check text-success"></i> 检测图片中的个人信息</li>
+                        <li><i class="fas fa-check text-success"></i> 自动遮盖隐私信息</li>
+                        <li><i class="fas fa-check text-success"></i> 详细处理报告</li>
+                    </ul>
+                </div>
+                <div class="mt-auto">
+                    <p class="small text-muted">
+                        <i class="fas fa-info-circle"></i>
+                        支持PDF文件，最大1000MB
+                    </p>
+                </div>
+            </div>
+            
+            <!-- 主内容区 -->
+            <div class="col-md-9 p-4">
+                <h2 class="mb-4">PDF隐私信息遮盖</h2>
+                
+                <!-- 文件上传区域 -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-upload"></i> 上传PDF文件</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="upload-area" id="uploadArea">
+                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                            <h5>拖拽PDF文件到此处或点击选择文件</h5>
+                            <p class="text-muted">支持PDF格式，最大1000MB</p>
+                            <input type="file" id="fileInput" accept=".pdf" class="d-none">
+                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                <i class="fas fa-folder-open"></i> 选择文件
+                            </button>
+                        </div>
+                        
+                        <div id="fileInfo" class="file-info" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong id="fileName"></strong>
+                                    <br>
+                                    <small class="text-muted" id="fileSize"></small>
+                                </div>
+                                <button class="btn btn-sm btn-outline-danger" onclick="removeFile()">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 文件操作按钮 -->
+                <div id="fileActions" class="mb-4" style="display: none;">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <button class="btn btn-info btn-lg w-100" onclick="previewFile()">
+                                <i class="fas fa-eye"></i> 预览文件
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <button class="btn btn-warning btn-lg w-100" onclick="maskPrivacy()">
+                                <i class="fas fa-mask"></i> 开始遮盖
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 预览区域 -->
+                <div id="previewSection" class="card mb-4" style="display: none;">
+                    <div class="card-header">
+                        <h5><i class="fas fa-eye"></i> 文件预览</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="previewContent"></div>
+                    </div>
+                </div>
+                
+                <!-- 处理进度 -->
+                <div id="progressContainer" class="progress-container card mb-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-cogs"></i> 处理进度</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="progress mb-3">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <div id="progressText" class="text-center">准备开始...</div>
+                    </div>
+                </div>
+                
+                <!-- 处理结果 -->
+                <div id="resultSection" class="card mb-4" style="display: none;">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-bar"></i> 处理结果</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="resultContent"></div>
+                    </div>
+                </div>
+                
+                <!-- 下载区域 -->
+                <div id="downloadSection" class="card mb-4" style="display: none;">
+                    <div class="card-header">
+                        <h5><i class="fas fa-download"></i> 下载处理后的文件</h5>
+                    </div>
+                    <div class="card-body text-center">
+                        <button class="btn btn-success btn-lg me-3" onclick="downloadFile()">
+                            <i class="fas fa-download"></i> 下载文件
+                        </button>
+                        <button class="btn btn-primary btn-lg" onclick="viewFile()">
+                            <i class="fas fa-eye"></i> 在线查看
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载提示模态框 -->
+    <div class="modal fade" id="loadingModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-body text-center p-4">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">处理中...</span>
+                    </div>
+                    <h5>正在处理PDF文件...</h5>
+                    <p class="text-muted">请稍候，这可能需要几分钟时间</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script>
+        let currentFile = null;
+        let currentFilename = null;
+        
+        // 文件拖拽上传
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+        
+        function handleFile(file) {
+            if (file.type !== 'application/pdf') {
+                alert('请选择PDF文件！');
+                return;
+            }
+            
+            if (file.size > 1000 * 1024 * 1024) {
+                alert('文件大小不能超过1000MB！');
+                return;
+            }
+            
+            currentFile = file;
+            uploadFile(file);
+        }
+        
+        function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            axios.post('/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            })
+            .then(response => {
+                if (response.data.success) {
+                    currentFilename = response.data.filename;
+                    showFileInfo(file.name, formatFileSize(file.size));
+                    showFileActions();
+                } else {
+                    alert('上传失败：' + response.data.error);
+                }
+            })
+            .catch(error => {
+                alert('上传失败：' + (error.response?.data?.error || error.message));
+            });
+        }
+        
+        function showFileInfo(name, size) {
+            document.getElementById('fileName').textContent = name;
+            document.getElementById('fileSize').textContent = size;
+            document.getElementById('fileInfo').style.display = 'block';
+        }
+        
+        function showFileActions() {
+            document.getElementById('fileActions').style.display = 'block';
+        }
+        
+        function removeFile() {
+            currentFile = null;
+            currentFilename = null;
+            document.getElementById('fileInfo').style.display = 'none';
+            document.getElementById('fileActions').style.display = 'none';
+            document.getElementById('previewSection').style.display = 'none';
+            document.getElementById('resultSection').style.display = 'none';
+            document.getElementById('downloadSection').style.display = 'none';
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        function previewFile() {
+            if (!currentFilename) return;
+            
+            axios.get(`/preview/${currentFilename}`)
+                .then(response => {
+                    const data = response.data;
+                    if (data.error) {
+                        alert('预览失败：' + data.error);
+                        return;
+                    }
+                    
+                    const previewContent = `
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>文件信息：</h6>
+                                <ul class="list-unstyled">
+                                    <li><strong>页数：</strong>${data.page_count}</li>
+                                    <li><strong>文件大小：</strong>${formatFileSize(data.file_size)}</li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>第一页预览：</h6>
+                                <div class="preview-container">
+                                    <pre class="small">${data.first_page_preview || '无文本内容'}</pre>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('previewContent').innerHTML = previewContent;
+                    document.getElementById('previewSection').style.display = 'block';
+                })
+                .catch(error => {
+                    alert('预览失败：' + (error.response?.data?.error || error.message));
+                });
+        }
+        
+        function maskPrivacy() {
+            if (!currentFilename) return;
+            
+            // 显示加载模态框
+            const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
+            loadingModal.show();
+            
+            // 显示进度条
+            document.getElementById('progressContainer').style.display = 'block';
+            updateProgress(10, '开始检测隐私信息...');
+            
+            axios.post(`/mask/${currentFilename}`)
+                .then(response => {
+                    const data = response.data;
+                    if (data.error) {
+                        alert('遮盖失败：' + data.error);
+                        loadingModal.hide();
+                        return;
+                    }
+                    
+                    updateProgress(100, '处理完成！');
+                    setTimeout(() => {
+                        loadingModal.hide();
+                        showResult(data);
+                        showDownloadSection();
+                    }, 1000);
+                })
+                .catch(error => {
+                    loadingModal.hide();
+                    alert('遮盖失败：' + (error.response?.data?.error || error.message));
+                });
+        }
+        
+        function updateProgress(percent, text) {
+            const progressBar = document.querySelector('.progress-bar');
+            const progressText = document.getElementById('progressText');
+            
+            progressBar.style.width = percent + '%';
+            progressText.textContent = text;
+        }
+        
+        function showResult(data) {
+            const resultContent = `
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card result-card">
+                            <div class="card-body text-center">
+                                <h3 class="text-primary">${data.total_found}</h3>
+                                <p class="mb-0">检测到的隐私信息</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card result-card">
+                            <div class="card-body text-center">
+                                <h3 class="text-success">${data.successful_masks}</h3>
+                                <p class="mb-0">成功遮盖</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card result-card">
+                            <div class="card-body text-center">
+                                <h3 class="text-danger">${data.failed_masks}</h3>
+                                <p class="mb-0">遮盖失败</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-4">
+                    <h6>详细处理信息：</h6>
+                    <div class="mask-details">
+                        ${data.details.map(detail => `
+                            <div class="alert alert-${detail.status === '成功' ? 'success' : 'danger'} alert-sm">
+                                <strong>第${detail.page}页</strong> - ${detail.type}: ${detail.value}
+                                <span class="badge bg-${detail.status === '成功' ? 'success' : 'danger'} ms-2">
+                                    ${detail.status}
+                                </span>
+                                ${detail.error ? `<br><small class="text-muted">错误: ${detail.error}</small>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('resultContent').innerHTML = resultContent;
+            document.getElementById('resultSection').style.display = 'block';
+        }
+        
+        function showDownloadSection() {
+            document.getElementById('downloadSection').style.display = 'block';
+        }
+        
+        function downloadFile() {
+            if (!currentFilename) return;
+            window.open(`/download/masked_${currentFilename}`, '_blank');
+        }
+        
+        function viewFile() {
+            if (!currentFilename) return;
+            window.open(`/view/masked_${currentFilename}`, '_blank');
+        }
+    </script>
+</body>
+</html>
+
