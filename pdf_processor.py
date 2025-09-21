@@ -191,6 +191,29 @@ class PDFProcessor:
                                     'pattern': 'image'
                                 })
                             
+                            # 身份证标签行：只遮盖“住址/公民身份证号”右侧的值，避免遮盖照片
+                            try:
+                                label_keys = [
+                                    ('住址', '住址'),
+                                    ('公民身份号码', '公民身份号码'),
+                                    ('公民身份证号', '公民身份证号')
+                                ]
+                                for key_text, label_name in label_keys:
+                                    if key_text in text and len(text) > len(key_text) + 1:
+                                        privacy_info.append({
+                                            'type': f'{label_name}(图片值)',
+                                            'value': text,
+                                            'bbox': bbox,
+                                            'img_size': (img_w, img_h),
+                                            'confidence': confidence,
+                                            'pattern': 'image',
+                                            'value_right': True,
+                                            'label_len': len(key_text),
+                                            'text_len': len(text)
+                                        })
+                            except Exception:
+                                pass
+                            
                             # 检测手机号码
                             phone_matches = re.finditer(self.patterns['phone'], text)
                             for match in phone_matches:
@@ -225,7 +248,7 @@ class PDFProcessor:
                                             'pattern': 'image'
                                         })
 
-                # 二维码 & 条形码检测（仅在证书/身份证上下文中）
+                # 二维码 & 条形码检测（仅在证书/身份证上下文中，且必须有实际图像）
                 try:
                     # 检查页面是否包含证书或身份证相关关键词
                     page_text = ""
@@ -242,7 +265,8 @@ class PDFProcessor:
                         img_cv = cv2.imread(image_path)
                         if img_cv is not None:
                             data, points, _ = qr_detector.detectAndDecode(img_cv)
-                            if points is not None and len(points) == 4 and data:  # 必须有数据才遮盖
+                            # 必须有数据且检测到实际二维码图像才遮盖
+                            if points is not None and len(points) == 4 and data and len(data.strip()) > 0:
                                 pts = points.reshape(4, 2).tolist()
                                 privacy_info.append({
                                     'type': '二维码',
@@ -273,8 +297,8 @@ class PDFProcessor:
                             except Exception:
                                 objs = []
                             for obj in objs:
-                                # 只处理有实际数据的码
-                                if obj.data:
+                                # 只处理有实际数据且检测到实际条形码图像的码
+                                if obj.data and len(obj.data) > 0:
                                     rect = obj.rect  # left, top, width, height
                                     bbox = [rect.left, rect.top, rect.left + rect.width, rect.top + rect.height]
                                     privacy_info.append({
@@ -333,7 +357,7 @@ class PDFProcessor:
         return protected_rects
 
     def mask_text_privacy(self, page, privacy_info):
-        """遮盖文本中的隐私信息（使用红线永久遮盖）"""
+        """遮盖文本中的隐私信息（使用白色色块遮盖）"""
         for info in privacy_info:
             try:
                 if info['pattern'] == 'text':
@@ -345,8 +369,8 @@ class PDFProcessor:
                         protect_regions = self._detect_seal_regions(page)
                         if any(self._rect_overlap_ratio(rect, pr) > 0.5 for pr in protect_regions):
                             continue
-                        # 添加红线注释并应用
-                        page.add_redact_annot(rect, fill=(1, 1, 1))
+                        # 使用白色色块遮盖
+                        page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1))
                         
                         # 记录成功遮盖
                         self.mask_results['successful_masks'] += 1
@@ -371,7 +395,7 @@ class PDFProcessor:
                 })
     
     def mask_image_privacy(self, page, privacy_info):
-        """遮盖图片中的隐私信息（使用红线永久遮盖）"""
+        """遮盖图片中的隐私信息（使用白色色块遮盖）"""
         for info in privacy_info:
             try:
                 if info['pattern'] == 'image':
@@ -418,11 +442,28 @@ class PDFProcessor:
                         y1, y2 = min(y1, y2), max(y1, y2)
 
                     rect = fitz.Rect(float(x1), float(y1), float(x2), float(y2))
+                    
+                    # 如果是标签行，仅遮盖右侧的值部分，限制遮盖宽度，避免遮住身份证照片
+                    if info.get('value_right'):
+                        label_len = max(1, int(info.get('label_len', 2)))
+                        text_len = max(label_len + 1, int(info.get('text_len', label_len + 5)))
+                        # 估算值区域起点（在bbox内部向右偏移）
+                        ratio = min(0.85, max(0.1, (label_len + 1) / float(text_len)))
+                        new_x1 = rect.x0 + ratio * (rect.x1 - rect.x0)
+                        # 限制遮盖区域最大宽度为原bbox的60%，避免大范围遮挡
+                        max_width = 0.6 * (rect.x1 - rect.x0)
+                        if rect.x1 - new_x1 > max_width:
+                            rect = fitz.Rect(new_x1, rect.y0, new_x1 + max_width, rect.y1)
+                        else:
+                            rect = fitz.Rect(new_x1, rect.y0, rect.x1, rect.y1)
+                    
                     # 保护电子印章：若大幅重叠则跳过
                     protect_regions = self._detect_seal_regions(page)
                     if any(self._rect_overlap_ratio(rect, pr) > 0.5 for pr in protect_regions):
                         continue
-                    page.add_redact_annot(rect, fill=(1, 1, 1))
+                    
+                    # 使用白色色块遮盖
+                    page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1))
                     
                     # 记录成功遮盖
                     self.mask_results['successful_masks'] += 1
@@ -520,12 +561,6 @@ class PDFProcessor:
                 # 遮盖图片隐私信息
                 if image_privacy:
                     self.mask_image_privacy(page, image_privacy)
-
-                # 应用当前页的红线遮盖，使内容不可逆
-                try:
-                    page.apply_redactions()
-                except Exception:
-                    pass
             # 章节删除
             rm = self._mark_pages_for_removal()
             remove_list = sorted(list(set(rm['remove_pages'] + rm['remove_finance_pages'])), reverse=True)
@@ -563,8 +598,8 @@ class PDFProcessor:
     def save_masked_pdf(self, output_path):
         """保存遮盖后的PDF"""
         try:
-            # 使用增强调优选项，清理被遮盖对象，减少被恢复风险
-            self.doc.save(output_path, deflate=True, garbage=4, clean=True, incremental=False)
+            # 保存PDF文件
+            self.doc.save(output_path)
             return True
         except Exception as e:
             print(f"保存PDF失败: {e}")
